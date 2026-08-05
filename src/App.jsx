@@ -9,6 +9,7 @@ import { TextField, PasswordField, TextArea, DateField, TimeField, formatTimeRan
 import { downloadIcsForUser, googleCalendarUrl } from"./calendarExport";
 import IdeasBoard from"./Ideas";
 import CalendarHub from"./CalendarHub";
+import AdminApp from"./Admin";
 
 const STORAGE_KEY ="meetings-cal:user";
 const LAST_NAME_KEY ="meetings-cal:last-name";
@@ -18,6 +19,7 @@ const LAST_CAL_KEY ="meetings-cal:last-calendar";
 
 function parseRoute() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (path === "/admin") return { type: "admin" };
   const join = path.match(/^\/join\/([^/]+)$/);
   if (join) return { type: "join", token: decodeURIComponent(join[1]) };
   const cal = path.match(/^\/c\/([^/]+)$/);
@@ -189,6 +191,10 @@ export default function App() {
       setCalReady(!user ? true : false);
       return;
     }
+    if (route.type ==="admin") {
+      setCalReady(true);
+      return;
+    }
 
     let cancelled = false;
     (async () => {
@@ -353,12 +359,21 @@ export default function App() {
   const selectedKey = selectedDay ? toKey(year, month, selectedDay) : null;
   const selectedEvents = selectedKey ? eventsOn(selectedKey) : [];
 
-  if (!authReady || (user && !calReady)) {
+  if (!authReady || (user && !calReady && route.type !=="admin")) {
     return (
       <div style={{ background:"#1B1F2A", minHeight:"100vh" }} className="flex items-center justify-center">
         <FontLoader />
         <Loader2 className="animate-spin" size={28} style={{ color:"#E8A33D" }} />
       </div>
+    );
+  }
+
+  if (route.type ==="admin") {
+    return (
+      <>
+        <FontLoader />
+        <AdminApp onExit={() => { navigate("/"); setRoute({ type:"hub" }); }} />
+      </>
     );
   }
 
@@ -618,6 +633,10 @@ export default function App() {
           user={user}
           onClose={() => setShowShare(false)}
           onUpdated={setCalendar}
+          onDeleted={() => {
+            setShowShare(false);
+            goHub();
+          }}
         />
       )}
     </div>
@@ -1085,10 +1104,11 @@ function EventRow({ ev, onOpen, showExport = false, userName }) {
   );
 }
 
-function ShareCalendarModal({ calendar, user, onClose, onUpdated }) {
+function ShareCalendarModal({ calendar, user, onClose, onUpdated, onDeleted }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const isOwner = calendar.role ==="owner";
   const inviteUrl = calendar.inviteToken
     ? `${window.location.origin}/join/${calendar.inviteToken}`
@@ -1130,6 +1150,19 @@ function ShareCalendarModal({ calendar, user, onClose, onUpdated }) {
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
       setError("Не удалось скопировать");
+    }
+  }
+
+  async function removeCalendar() {
+    if (!isOwner) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteCalendar(calendar.slug, user.id);
+      onDeleted?.();
+    } catch (e) {
+      setError(e.message ||"Не удалось удалить");
+      setBusy(false);
     }
   }
 
@@ -1219,7 +1252,49 @@ function ShareCalendarModal({ calendar, user, onClose, onUpdated }) {
             </p>
           )}
 
-          {error && <div style={{ color:"#D8635B" }} className="text-sm">{error}</div>}
+          {isOwner && (
+            <div style={{ borderColor:"#DCD4C0" }} className="border-t mt-4 pt-4">
+              {!confirmDelete ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(true)}
+                  style={{ color:"#D8635B" }}
+                  className="ui-press-static w-full text-sm py-2 rounded-xl hover:bg-red-50 font-semibold"
+                >
+                  Удалить календарь
+                </button>
+              ) : (
+                <div style={{ background:"#D8635B12", border:"1px solid #D8635B55" }} className="rounded-2xl p-3">
+                  <p style={{ color:"#D8635B" }} className="text-sm mb-3">
+                    Удалятся все встречи, идеи и комментарии этого календаря. Это необратимо.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={removeCalendar}
+                      style={{ background:"#D8635B", color:"#F7F3EA" }}
+                      className="ui-press-static flex-1 rounded-xl py-2.5 text-sm font-semibold"
+                    >
+                      {busy ?"Удаляю…" :"Да, удалить"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setConfirmDelete(false)}
+                      style={{ color:"#8B8FA0", borderColor:"#DCD4C0" }}
+                      className="ui-press-static rounded-xl px-3 text-sm border"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && <div style={{ color:"#D8635B" }} className="text-sm mt-3">{error}</div>}
         </>
       )}
     </ModalShell>

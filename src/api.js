@@ -38,6 +38,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ userId }),
     }),
+  deleteCalendar: (slug, userId) =>
+    request(`/api/calendars/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ userId }),
+    }),
   previewJoin: (token) => request(`/api/join/${encodeURIComponent(token)}`),
   joinCalendar: (token, userId) =>
     request(`/api/join/${encodeURIComponent(token)}`, {
@@ -93,4 +98,61 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ dateId, userId }),
     }),
+
+  adminLogin: (username, password) =>
+    request("/api/admin/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  adminLogout: (token) =>
+    request("/api/admin/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  adminMe: (token) =>
+    request("/api/admin/me", { headers: { Authorization: `Bearer ${token}` } }),
+  adminStats: (token) =>
+    request("/api/admin/stats", { headers: { Authorization: `Bearer ${token}` } }),
+  adminCalendars: (token) =>
+    request("/api/admin/calendars", { headers: { Authorization: `Bearer ${token}` } }),
+  adminUpdateCalendar: (token, id, payload) =>
+    request(`/api/admin/calendars/${id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    }),
+  adminDeleteCalendar: (token, id) =>
+    request(`/api/admin/calendars/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  adminEvents: (token, calendarId) => {
+    const q = calendarId ? `?calendarId=${encodeURIComponent(calendarId)}` : "";
+    return request(`/api/admin/events${q}`, { headers: { Authorization: `Bearer ${token}` } });
+  },
+  adminDeleteEvent: (token, id) =>
+    request(`/api/admin/events/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  adminComments: (token, calendarId) => {
+    const q = calendarId ? `?calendarId=${encodeURIComponent(calendarId)}` : "";
+    return request(`/api/admin/comments${q}`, { headers: { Authorization: `Bearer ${token}` } });
+  },
+  adminDeleteComment: (token, id) =>
+    request(`/api/admin/comments/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  adminIdeas: (token, calendarId) => {
+    const q = calendarId ? `?calendarId=${encodeURIComponent(calendarId)}` : "";
+    return request(`/api/admin/ideas${q}`, { headers: { Authorization: `Bearer ${token}` } });
+  },
+  adminDeleteIdea: (token, id) =>
+    request(`/api/admin/ideas/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  adminUsers: (token) =>
+    request("/api/admin/users", { headers: { Authorization: `Bearer ${token}` } }),
 };

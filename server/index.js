@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import db from "./db.js";
 import { hashPassword, verifyPassword } from "./auth.js";
 import { eventsToIcs } from "./ics.js";
+import { registerAdminRoutes, adminConfigured } from "./admin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -387,6 +388,18 @@ app.post("/api/calendars/:slug/rotate-invite", route((req, res) => {
   db.prepare("UPDATE calendars SET invite_token = ? WHERE id = ?").run(invite, cal.id);
   const updated = getCalendarById(cal.id);
   res.json(publicCalendar(updated, { role: "owner", includeInvite: true }));
+}));
+
+app.delete("/api/calendars/:slug", route((req, res) => {
+  const { userId } = req.body || {};
+  const cal = getCalendarBySlug(req.params.slug);
+  if (!cal) return res.status(404).json({ error: "Календарь не найден" });
+  const mem = membership(cal.id, userId);
+  if (!mem || mem.role !== "owner") {
+    return res.status(403).json({ error: "Удалить может только владелец" });
+  }
+  db.prepare("DELETE FROM calendars WHERE id = ?").run(cal.id);
+  res.json({ ok: true });
 }));
 
 app.get("/api/join/:token", route((req, res) => {
@@ -851,6 +864,13 @@ app.post("/api/ideas/:id/schedule", route((req, res) => {
     event: getEventById(eventId),
   });
 }));
+
+/* ---------- admin ---------- */
+
+registerAdminRoutes(app);
+if (!adminConfigured()) {
+  console.warn("[admin] SUPERADMIN_PASSWORD не задан — вход в /admin недоступен");
+}
 
 /* ---------- production static ---------- */
 
