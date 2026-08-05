@@ -1457,17 +1457,23 @@ function EventDetailModal({ event, name, onClose, onRsvp, onComment, onDelete })
                 </div>
               ))}
             </div>
-            <div className="flex gap-2 items-end">
-              <div className="flex-1 mb-0">
-                <TextField
-                  value={comment}
-                  onChange={setComment}
-                  onKeyDown={(e) => { if (e.key ==="Enter") addComment(); }}
-                  placeholder="Написать комментарий…"
-                  className="mb-0"
-                />
-              </div>
-              <button onClick={addComment} disabled={!comment.trim()} style={{ background: comment.trim() ?"#E8A33D" :"#DCD4C0", color:"#1B1F2A", height: 42 }} className="ui-press rounded-xl px-4 text-sm font-semibold mb-3">Отпр.</button>
+            <div className="flex gap-2 items-center">
+              <TextField
+                value={comment}
+                onChange={setComment}
+                onKeyDown={(e) => { if (e.key ==="Enter") addComment(); }}
+                placeholder="Написать комментарий…"
+                className="mb-0 flex-1 min-w-0"
+              />
+              <button
+                type="button"
+                onClick={addComment}
+                disabled={!comment.trim()}
+                style={{ background: comment.trim() ?"#E8A33D" :"#DCD4C0", color:"#1B1F2A" }}
+                className="ui-press-static shrink-0 self-stretch rounded-xl px-3.5 text-sm font-semibold"
+              >
+                Отпр.
+              </button>
             </div>
           </div>
 
