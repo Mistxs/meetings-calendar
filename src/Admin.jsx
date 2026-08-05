@@ -8,6 +8,7 @@ import { PasswordField, TextField } from "./ui";
 
 const ADMIN_TOKEN_KEY = "meetings-cal:admin-token";
 const SITE_USER_KEY = "meetings-cal:user";
+const SITE_LAST_NAME_KEY = "meetings-cal:last-name";
 
 function loadSiteUser() {
   try {
@@ -16,6 +17,11 @@ function loadSiteUser() {
   } catch {
     return null;
   }
+}
+
+function saveSiteUser(user) {
+  localStorage.setItem(SITE_USER_KEY, JSON.stringify(user));
+  localStorage.setItem(SITE_LAST_NAME_KEY, user.name);
 }
 
 function loadToken() {
@@ -135,15 +141,11 @@ export default function AdminApp({ onExit }) {
   }
 
   async function openCalendar(cal) {
-    const siteUser = loadSiteUser();
-    if (!siteUser) {
-      setError("Сначала войдите на сайте под своим именем — тогда админка выдаст доступ к календарю.");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
-      const res = await api.adminGrantAccess(token, cal.id, siteUser.id);
+      const res = await api.adminGrantAccess(token, cal.id, loadSiteUser()?.id);
+      if (res.user) saveSiteUser(res.user);
       window.location.href = `/c/${res.slug}`;
     } catch (e) {
       setError(e.message || "Не удалось открыть календарь");

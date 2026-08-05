@@ -163,23 +163,42 @@ export function registerAdminRoutes(app) {
     res.json(db.prepare("SELECT * FROM calendars WHERE id = ?").get(cal.id));
   }));
 
-  /** Superadmin bypass: grant the current site user access so any calendar can be opened. */
+  /**
+   * Superadmin bypass: grant a site identity access so any calendar can be opened.
+   * Falls back to a dedicated account for the admin when nobody is signed in on the site.
+   */
   app.post("/api/admin/calendars/:id/access", adminOk((req, res) => {
     const cal = db.prepare("SELECT * FROM calendars WHERE id = ?").get(req.params.id);
     if (!cal) return res.status(404).json({ error: "Календарь не найден" });
 
-    const userId = String(req.body?.userId || "");
-    const user = db.prepare("SELECT id FROM users WHERE id = ?").get(userId);
+    const requestedId = String(req.body?.userId || "");
+    let user = requestedId
+      ? db.prepare("SELECT id, name, is_guest FROM users WHERE id = ?").get(requestedId)
+      : null;
+
     if (!user) {
-      return res.status(400).json({ error: "Сначала войдите на сайте под своим именем" });
+      user = db
+        .prepare("SELECT id, name, is_guest FROM users WHERE name = ? COLLATE NOCASE")
+        .get(ADMIN_USER);
+    }
+
+    if (!user) {
+      const id = crypto.randomBytes(9).toString("hex");
+      db.prepare(
+        "INSERT INTO users (id, name, password_hash, is_guest, created_at) VALUES (?, ?, '', 0, ?)"
+      ).run(id, ADMIN_USER, Date.now());
+      user = { id, name: ADMIN_USER, is_guest: 0 };
     }
 
     db.prepare(
       `INSERT OR IGNORE INTO calendar_members (calendar_id, user_id, role, joined_at)
        VALUES (?, ?, 'member', ?)`
-    ).run(cal.id, userId, Date.now());
+    ).run(cal.id, user.id, Date.now());
 
-    res.json({ slug: cal.slug });
+    res.json({
+      slug: cal.slug,
+      user: { id: user.id, name: user.name, isGuest: !!user.is_guest },
+    });
   }));
 
   app.delete("/api/admin/calendars/:id", adminOk((req, res) => {

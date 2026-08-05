@@ -125,7 +125,7 @@ export const api = {
     request(`/api/admin/calendars/${id}/access`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId: userId || null }),
     }),
   adminDeleteCalendar: (token, id) =>
     request(`/api/admin/calendars/${id}`, {
