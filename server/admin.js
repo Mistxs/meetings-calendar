@@ -163,6 +163,25 @@ export function registerAdminRoutes(app) {
     res.json(db.prepare("SELECT * FROM calendars WHERE id = ?").get(cal.id));
   }));
 
+  /** Superadmin bypass: grant the current site user access so any calendar can be opened. */
+  app.post("/api/admin/calendars/:id/access", adminOk((req, res) => {
+    const cal = db.prepare("SELECT * FROM calendars WHERE id = ?").get(req.params.id);
+    if (!cal) return res.status(404).json({ error: "Календарь не найден" });
+
+    const userId = String(req.body?.userId || "");
+    const user = db.prepare("SELECT id FROM users WHERE id = ?").get(userId);
+    if (!user) {
+      return res.status(400).json({ error: "Сначала войдите на сайте под своим именем" });
+    }
+
+    db.prepare(
+      `INSERT OR IGNORE INTO calendar_members (calendar_id, user_id, role, joined_at)
+       VALUES (?, ?, 'member', ?)`
+    ).run(cal.id, userId, Date.now());
+
+    res.json({ slug: cal.slug });
+  }));
+
   app.delete("/api/admin/calendars/:id", adminOk((req, res) => {
     const result = db.prepare("DELETE FROM calendars WHERE id = ?").run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ error: "Календарь не найден" });

@@ -1,12 +1,22 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   CalendarDays, Lightbulb, Loader2, LogOut, MessageCircle, Trash2,
-  Users, LayoutDashboard, Shield,
+  Users, LayoutDashboard, Shield, ExternalLink, Link2, Lock,
 } from "lucide-react";
 import { api } from "./api";
 import { PasswordField, TextField } from "./ui";
 
 const ADMIN_TOKEN_KEY = "meetings-cal:admin-token";
+const SITE_USER_KEY = "meetings-cal:user";
+
+function loadSiteUser() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SITE_USER_KEY) || "null");
+    return parsed?.id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 function loadToken() {
   return localStorage.getItem(ADMIN_TOKEN_KEY) || "";
@@ -120,6 +130,23 @@ export default function AdminApp({ onExit }) {
     } catch (e) {
       setError(e.message || "Не удалось удалить");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openCalendar(cal) {
+    const siteUser = loadSiteUser();
+    if (!siteUser) {
+      setError("Сначала войдите на сайте под своим именем — тогда админка выдаст доступ к календарю.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.adminGrantAccess(token, cal.id, siteUser.id);
+      window.location.href = `/c/${res.slug}`;
+    } catch (e) {
+      setError(e.message || "Не удалось открыть календарь");
       setBusy(false);
     }
   }
@@ -273,11 +300,24 @@ export default function AdminApp({ onExit }) {
                     <button
                       type="button"
                       disabled={busy}
+                      onClick={() => openCalendar(c)}
+                      style={{ background: "#232323", color: "#F7F3EA" }}
+                      className="ui-press-static text-[11px] font-semibold rounded-lg px-2 py-1 flex items-center gap-1"
+                      title="Открыть календарь (выдать себе доступ)"
+                    >
+                      <ExternalLink size={11} /> Открыть
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
                       onClick={() => setVisibility(c.id, c.visibility === "link" ? "private" : "link")}
                       style={{ color: "#2E8B8B", borderColor: "#DCD4C0" }}
-                      className="ui-press-static text-[11px] border rounded-lg px-2 py-1"
+                      className="ui-press-static text-[11px] border rounded-lg px-2 py-1 flex items-center gap-1"
+                      title={c.visibility === "link" ? "Сделать приватным" : "Открыть доступ по ссылке"}
                     >
-                      {c.visibility === "link" ? "→ private" : "→ link"}
+                      {c.visibility === "link"
+                        ? <><Lock size={11} /> приватный</>
+                        : <><Link2 size={11} /> по ссылке</>}
                     </button>
                     <DangerBtn disabled={busy} onClick={() => remove("calendar", c.id)} />
                   </div>
