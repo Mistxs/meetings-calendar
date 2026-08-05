@@ -9,6 +9,7 @@ User=mistxs
 Group=mistxs
 WorkingDirectory=/home/mistxs/projects/meetings-cal
 Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
 Environment=PORT=3011
 ExecStart=/usr/bin/node server/index.js
 Restart=on-failure
