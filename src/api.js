@@ -1,10 +1,15 @@
 async function request(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+    });
+  } catch {
+    throw new Error("Сервер недоступен. Перезапустите npm run dev (API на порту 3001).");
+  }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  if (!res.ok) throw new Error(data.error || data.detail || `Ошибка ${res.status}`);
   return data;
 }
 
@@ -13,6 +18,8 @@ export const api = {
     request("/api/register", { method: "POST", body: JSON.stringify({ name, password }) }),
   login: (name, password) =>
     request("/api/login", { method: "POST", body: JSON.stringify({ name, password }) }),
+  guest: (name) =>
+    request("/api/guest", { method: "POST", body: JSON.stringify({ name }) }),
   getUser: (id) => request(`/api/users/${id}`),
   listEvents: () => request("/api/events"),
   myEvents: (userId, status = "yes") =>

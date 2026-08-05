@@ -17,8 +17,19 @@ function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+/** Wrap sync handlers so SQLite/runtime errors become JSON 500 instead of a dead process. */
+function route(handler) {
+  return (req, res, next) => {
+    try {
+      handler(req, res, next);
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
 function publicUser(row) {
-  return { id: row.id, name: row.name };
+  return { id: row.id, name: row.name, isGuest: !!row.is_guest };
 }
 
 function rowToEvent(row) {
@@ -97,16 +108,22 @@ app.post("/api/register", (req, res) => {
   if (password.length < 4) return res.status(400).json({ error: "Пароль — минимум 4 символа" });
   if (password.length > 100) return res.status(400).json({ error: "Пароль слишком длинный" });
 
-  const existing = db.prepare("SELECT id FROM users WHERE name = ? COLLATE NOCASE").get(name);
+  const existing = db
+    .prepare("SELECT id, is_guest FROM users WHERE name = ? COLLATE NOCASE")
+    .get(name);
   if (existing) {
-    return res.status(409).json({ error: "Такое имя уже занято. Войдите или выберите другое." });
+    return res.status(409).json({
+      error: existing.is_guest
+        ? "Это имя уже используется гостем. Выберите другое или продолжите как гость."
+        : "Такое имя уже занято. Войдите или выберите другое.",
+    });
   }
 
   const id = uid();
   db.prepare(
-    "INSERT INTO users (id, name, password_hash, created_at) VALUES (?, ?, ?, ?)"
+    "INSERT INTO users (id, name, password_hash, is_guest, created_at) VALUES (?, ?, ?, 0, ?)"
   ).run(id, name, hashPassword(password), Date.now());
-  res.json(publicUser({ id, name }));
+  res.json(publicUser({ id, name, is_guest: 0 }));
 });
 
 app.post("/api/login", (req, res) => {
@@ -115,10 +132,13 @@ app.post("/api/login", (req, res) => {
   if (!name || !password) return res.status(400).json({ error: "Укажите имя и пароль" });
 
   const user = db
-    .prepare("SELECT id, name, password_hash FROM users WHERE name = ? COLLATE NOCASE")
+    .prepare("SELECT id, name, password_hash, is_guest FROM users WHERE name = ? COLLATE NOCASE")
     .get(name);
   if (!user) {
     return res.status(404).json({ error: "Пользователь не найден. Зарегистрируйтесь." });
+  }
+  if (user.is_guest) {
+    return res.status(400).json({ error: "Это гостевой аккаунт — выберите «Как гость»." });
   }
   if (!user.password_hash || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: "Неверный пароль" });
@@ -126,8 +146,33 @@ app.post("/api/login", (req, res) => {
   res.json(publicUser(user));
 });
 
+app.post("/api/guest", (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Укажите имя" });
+  if (name.length > 40) return res.status(400).json({ error: "Имя слишком длинное" });
+
+  const existing = db
+    .prepare("SELECT id, name, is_guest FROM users WHERE name = ? COLLATE NOCASE")
+    .get(name);
+
+  if (existing) {
+    if (!existing.is_guest) {
+      return res.status(409).json({
+        error: "Имя занято зарегистрированным пользователем. Войдите или выберите другое.",
+      });
+    }
+    return res.json(publicUser(existing));
+  }
+
+  const id = uid();
+  db.prepare(
+    "INSERT INTO users (id, name, password_hash, is_guest, created_at) VALUES (?, ?, '', 1, ?)"
+  ).run(id, name, Date.now());
+  res.json(publicUser({ id, name, is_guest: 1 }));
+});
+
 app.get("/api/users/:id", (req, res) => {
-  const user = db.prepare("SELECT id, name FROM users WHERE id = ?").get(req.params.id);
+  const user = db.prepare("SELECT id, name, is_guest FROM users WHERE id = ?").get(req.params.id);
   if (!user) return res.status(404).json({ error: "Не найден" });
   res.json(publicUser(user));
 });
@@ -388,9 +433,8 @@ app.delete("/api/ideas/:id", (req, res) => {
 });
 
 app.post("/api/ideas/:id/vote", (req, res) => {
-  const idea = db.prepare("SELECT id, status FROM ideas WHERE id = ?").get(req.params.id);
+  const idea = db.prepare("SELECT id FROM ideas WHERE id = ?").get(req.params.id);
   if (!idea) return res.status(404).json({ error: "Идея не найдена" });
-  if (idea.status !== "open") return res.status(400).json({ error: "Голосование закрыто" });
 
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: "Нужен userId" });
@@ -537,6 +581,25 @@ if (process.env.NODE_ENV === "production") {
   app.get("*", (_req, res) => res.sendFile(path.join(dist, "index.html")));
 }
 
-app.listen(PORT, () => {
+app.use((err, _req, res, _next) => {
+  console.error("[api]", err);
+  if (res.headersSent) return;
+  const status = err.status || 500;
+  res.status(status).json({
+    error: status === 500 ? "Внутренняя ошибка сервера" : err.message,
+    detail: process.env.NODE_ENV === "production" ? undefined : String(err.message || err),
+  });
+});
+
+const server = app.listen(PORT, () => {
   console.log(`API http://localhost:${PORT}`);
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`Порт ${PORT} занят. Остановите другой процесс: lsof -ti :${PORT} | xargs kill`);
+    process.exit(1);
+  }
+  console.error(err);
+  process.exit(1);
 });

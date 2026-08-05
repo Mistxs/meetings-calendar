@@ -10,12 +10,14 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const db = new Database(path.join(dataDir, "meetings.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
+db.pragma("busy_timeout = 5000");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL DEFAULT '',
+    is_guest INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
 
@@ -99,6 +101,10 @@ function hasColumn(table, column) {
 
 if (!hasColumn("users", "password_hash")) {
   db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''`);
+}
+
+if (!hasColumn("users", "is_guest")) {
+  db.exec(`ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0`);
 }
 
 if (!hasColumn("events", "end_time")) {
