@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#F7F3EA"/>
+  <!-- rings -->
+  <rect x="10" y="5" width="2.5" height="5" rx="1.25" fill="#232323"/>
+  <rect x="19.5" y="5" width="2.5" height="5" rx="1.25" fill="#232323"/>
+  <!-- body -->
+  <rect x="6" y="8" width="20" height="18" rx="3.5" fill="#FFFDF8" stroke="#232323" stroke-width="1.75"/>
+  <!-- header -->
+  <path d="M6 11.5C6 9.567 7.567 8 9.5 8H22.5C24.433 8 26 9.567 26 11.5V13H6V11.5Z" fill="#E8A33D"/>
+  <path d="M6 13H26" stroke="#232323" stroke-width="1.5"/>
+  <!-- meeting mark -->
+  <circle cx="16" cy="20" r="4.25" fill="#2E8B8B"/>
+  <path d="M13.9 20.05L15.35 21.45L18.25 18.35" stroke="#F7F3EA" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
