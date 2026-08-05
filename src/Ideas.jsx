@@ -26,7 +26,7 @@ function Avatar({ name, size = 28 }) {
   );
 }
 
-export default function IdeasBoard({ user, onScheduled }) {
+export default function IdeasBoard({ user, calendarId, onScheduled }) {
   const [ideas, setIdeas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -34,9 +34,10 @@ export default function IdeasBoard({ user, onScheduled }) {
   const [busyId, setBusyId] = useState(null);
 
   const load = useCallback(async () => {
+    if (!calendarId) return;
     setLoading(true);
     try {
-      const list = await api.listIdeas(user.id);
+      const list = await api.listIdeas(calendarId, user.id);
       setIdeas(sortIdeas(Array.isArray(list) ? list : []));
       setError(null);
     } catch (e) {
@@ -44,7 +45,7 @@ export default function IdeasBoard({ user, onScheduled }) {
     } finally {
       setLoading(false);
     }
-  }, [user.id]);
+  }, [user.id, calendarId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -93,7 +94,7 @@ export default function IdeasBoard({ user, onScheduled }) {
           onCancel={() => setShowNew(false)}
           onCreate={async (payload) => {
             await wrap("new", async () => {
-              const idea = await api.createIdea({ ...payload, userId: user.id });
+              const idea = await api.createIdea({ ...payload, userId: user.id, calendarId });
               setIdeas((prev) => [idea, ...prev]);
               setShowNew(false);
             });

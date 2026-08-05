@@ -21,12 +21,46 @@ export const api = {
   guest: (name) =>
     request("/api/guest", { method: "POST", body: JSON.stringify({ name }) }),
   getUser: (id) => request(`/api/users/${id}`),
-  listEvents: () => request("/api/events"),
-  myEvents: (userId, status = "yes") =>
-    request(`/api/users/${userId}/events?status=${encodeURIComponent(status)}`),
+
+  listCalendars: (userId) =>
+    request(`/api/calendars?userId=${encodeURIComponent(userId)}`),
+  createCalendar: (payload) =>
+    request("/api/calendars", { method: "POST", body: JSON.stringify(payload) }),
+  getCalendar: (slug, userId) =>
+    request(`/api/calendars/${encodeURIComponent(slug)}?userId=${encodeURIComponent(userId)}`),
+  updateCalendar: (slug, payload) =>
+    request(`/api/calendars/${encodeURIComponent(slug)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  rotateInvite: (slug, userId) =>
+    request(`/api/calendars/${encodeURIComponent(slug)}/rotate-invite`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    }),
+  previewJoin: (token) => request(`/api/join/${encodeURIComponent(token)}`),
+  joinCalendar: (token, userId) =>
+    request(`/api/join/${encodeURIComponent(token)}`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    }),
+
+  listEvents: (calendarId, userId) =>
+    request(
+      `/api/events?calendarId=${encodeURIComponent(calendarId)}&userId=${encodeURIComponent(userId)}`
+    ),
+  myEvents: (userId, status = "yes", calendarId) => {
+    const q = new URLSearchParams({ status });
+    if (calendarId) q.set("calendarId", calendarId);
+    return request(`/api/users/${userId}/events?${q}`);
+  },
   createEvent: (payload) =>
     request("/api/events", { method: "POST", body: JSON.stringify(payload) }),
-  deleteEvent: (id) => request(`/api/events/${id}`, { method: "DELETE" }),
+  deleteEvent: (id, userId) =>
+    request(`/api/events/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ userId }),
+    }),
   setRsvp: (eventId, userId, status) =>
     request(`/api/events/${eventId}/rsvp`, {
       method: "POST",
@@ -37,8 +71,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ userId, text }),
     }),
-  listIdeas: (userId) =>
-    request(`/api/ideas?userId=${encodeURIComponent(userId || "")}`),
+  listIdeas: (calendarId, userId) =>
+    request(
+      `/api/ideas?calendarId=${encodeURIComponent(calendarId)}&userId=${encodeURIComponent(userId || "")}`
+    ),
   createIdea: (payload) =>
     request("/api/ideas", { method: "POST", body: JSON.stringify(payload) }),
   deleteIdea: (id, userId) =>

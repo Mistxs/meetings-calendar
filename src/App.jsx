@@ -2,16 +2,35 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from
 import {
   ChevronLeft, ChevronRight, X, Camera, Plus, MapPin, Clock,
   MessageCircle, Check, Users, Loader2, CalendarDays, LogOut, UserRound,
-  Download, ExternalLink, Lightbulb, List, LayoutGrid,
+  Download, ExternalLink, Lightbulb, List, LayoutGrid, Link2, Lock, Share2,
 } from"lucide-react";
 import { api } from"./api";
 import { TextField, PasswordField, TextArea, DateField, TimeField, formatTimeRange } from"./ui";
 import { downloadIcsForUser, googleCalendarUrl } from"./calendarExport";
 import IdeasBoard from"./Ideas";
+import CalendarHub from"./CalendarHub";
 
 const STORAGE_KEY ="meetings-cal:user";
 const LAST_NAME_KEY ="meetings-cal:last-name";
 const LAYOUT_KEY ="meetings-cal:layout";
+const JOIN_KEY ="meetings-cal:pending-join";
+const LAST_CAL_KEY ="meetings-cal:last-calendar";
+
+function parseRoute() {
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  const join = path.match(/^\/join\/([^/]+)$/);
+  if (join) return { type: "join", token: decodeURIComponent(join[1]) };
+  const cal = path.match(/^\/c\/([^/]+)$/);
+  if (cal) return { type: "calendar", slug: decodeURIComponent(cal[1]) };
+  return { type: "hub" };
+}
+
+function navigate(path) {
+  if (window.location.pathname !== path) {
+    window.history.pushState({}, "", path);
+  }
+}
+
 const MONTHS = ["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 const WEEKDAYS = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 
@@ -95,6 +114,11 @@ function Avatar({ name, size = 28 }) {
 export default function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  const [route, setRoute] = useState(() => parseRoute());
+  const [calendar, setCalendar] = useState(null);
+  const [calReady, setCalReady] = useState(false);
+  const [joinPreview, setJoinPreview] = useState(null);
+  const [showShare, setShowShare] = useState(false);
   const [view, setView] = useState("calendar");
   const [layout, setLayout] = useState(() => loadLayout());
   const [year, setYear] = useState(new Date().getFullYear());
@@ -114,8 +138,35 @@ export default function App() {
   }
 
   useEffect(() => {
+    const onPop = () => setRoute(parseRoute());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
     (async () => {
       const stored = loadStoredUser();
+      if (route.type ==="join") {
+        sessionStorage.setItem(JOIN_KEY, route.token);
+        try {
+          const preview = await api.previewJoin(route.token);
+          setJoinPreview({ ...preview, token: route.token });
+        } catch (e) {
+          setJoinPreview(null);
+          setError(e.message ||"Ссылка недействительна");
+        }
+      } else if (!joinPreview) {
+        const pending = sessionStorage.getItem(JOIN_KEY);
+        if (pending) {
+          try {
+            const preview = await api.previewJoin(pending);
+            setJoinPreview({ ...preview, token: pending });
+          } catch {
+            sessionStorage.removeItem(JOIN_KEY);
+          }
+        }
+      }
+
       if (!stored) {
         setAuthReady(true);
         return;
@@ -130,12 +181,70 @@ export default function App() {
         setAuthReady(true);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!authReady || !user) {
+      setCalReady(!user ? true : false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setCalReady(false);
+      setError(null);
+
+      // Accept pending invite after login
+      const pending = sessionStorage.getItem(JOIN_KEY);
+      if (pending && (route.type ==="join" || route.type ==="hub")) {
+        try {
+          const joined = await api.joinCalendar(pending, user.id);
+          if (cancelled) return;
+          sessionStorage.removeItem(JOIN_KEY);
+          setJoinPreview(null);
+          setCalendar(joined);
+          localStorage.setItem(LAST_CAL_KEY, joined.slug);
+          navigate(`/c/${joined.slug}`);
+          setRoute({ type:"calendar", slug: joined.slug });
+          setCalReady(true);
+          return;
+        } catch (e) {
+          if (!cancelled) setError(e.message ||"Не удалось присоединиться");
+        }
+      }
+
+      if (route.type ==="calendar") {
+        try {
+          const cal = await api.getCalendar(route.slug, user.id);
+          if (cancelled) return;
+          setCalendar(cal);
+          localStorage.setItem(LAST_CAL_KEY, cal.slug);
+        } catch (e) {
+          if (cancelled) return;
+          setCalendar(null);
+          setError(e.message ||"Нет доступа к календарю");
+          navigate("/");
+          setRoute({ type:"hub" });
+        } finally {
+          if (!cancelled) setCalReady(true);
+        }
+        return;
+      }
+
+      // hub: optional auto-open last calendar if only one / last remembered
+      setCalendar(null);
+      if (!cancelled) setCalReady(true);
+    })();
+
+    return () => { cancelled = true; };
+  }, [authReady, user, route.type, route.slug]);
+
   const loadEvents = useCallback(async () => {
+    if (!user || !calendar) return;
     setLoading(true);
     try {
-      const list = await api.listEvents();
+      const list = await api.listEvents(calendar.id, user.id);
       setEvents(Array.isArray(list) ? list : []);
       setError(null);
     } catch (e) {
@@ -144,38 +253,63 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user, calendar]);
 
   const loadMyEvents = useCallback(async () => {
-    if (!user) return;
+    if (!user || !calendar) return;
     try {
-      const list = await api.myEvents(user.id,"yes");
+      const list = await api.myEvents(user.id,"yes", calendar.id);
       setMyEvents(Array.isArray(list) ? list : []);
     } catch {
       setMyEvents([]);
     }
-  }, [user]);
+  }, [user, calendar]);
 
   useEffect(() => {
-    if (user) loadEvents();
-  }, [user, loadEvents]);
+    if (user && calendar) loadEvents();
+  }, [user, calendar, loadEvents]);
 
   useEffect(() => {
-    if (user && view ==="cabinet") loadMyEvents();
-  }, [user, view, loadMyEvents]);
+    if (user && calendar && view ==="cabinet") loadMyEvents();
+  }, [user, calendar, view, loadMyEvents]);
 
   function handleAuth(nextUser) {
     setUser(nextUser);
     saveStoredUser(nextUser);
   }
 
+  function openCalendar(cal) {
+    setCalendar(cal);
+    localStorage.setItem(LAST_CAL_KEY, cal.slug);
+    sessionStorage.removeItem(JOIN_KEY);
+    setJoinPreview(null);
+    navigate(`/c/${cal.slug}`);
+    setRoute({ type:"calendar", slug: cal.slug });
+    setView("calendar");
+    setCalReady(true);
+  }
+
+  function goHub() {
+    setCalendar(null);
+    setOpenEvent(null);
+    setShowShare(false);
+    setEvents([]);
+    setMyEvents([]);
+    navigate("/");
+    setRoute({ type:"hub" });
+  }
+
   function logout() {
     clearStoredUser();
     setUser(null);
+    setCalendar(null);
     setEvents([]);
     setMyEvents([]);
     setView("calendar");
     setOpenEvent(null);
+    setShowShare(false);
+    navigate("/");
+    setRoute({ type:"hub" });
   }
 
   function replaceEvent(updated) {
@@ -219,7 +353,7 @@ export default function App() {
   const selectedKey = selectedDay ? toKey(year, month, selectedDay) : null;
   const selectedEvents = selectedKey ? eventsOn(selectedKey) : [];
 
-  if (!authReady) {
+  if (!authReady || (user && !calReady)) {
     return (
       <div style={{ background:"#1B1F2A", minHeight:"100vh" }} className="flex items-center justify-center">
         <FontLoader />
@@ -232,7 +366,21 @@ export default function App() {
     return (
       <>
         <FontLoader />
-        <AuthScreen onAuth={handleAuth} />
+        <AuthScreen onAuth={handleAuth} joinPreview={joinPreview} />
+      </>
+    );
+  }
+
+  if (!calendar) {
+    return (
+      <>
+        <FontLoader />
+        <CalendarHub
+          user={user}
+          joinPreview={joinPreview}
+          onOpen={openCalendar}
+          onLogout={logout}
+        />
       </>
     );
   }
@@ -245,10 +393,13 @@ export default function App() {
         isGuest={!!user.isGuest}
         saving={saving}
         view={view}
+        calendar={calendar}
         onToday={goToday}
         onCalendar={() => setView("calendar")}
         onIdeas={() => setView("ideas")}
         onCabinet={() => setView("cabinet")}
+        onShare={() => setShowShare(true)}
+        onSwitch={goHub}
         onLogout={logout}
       />
 
@@ -263,6 +414,7 @@ export default function App() {
         {view ==="cabinet" ? (
           <Cabinet
             user={user}
+            calendar={calendar}
             events={myEvents}
             loading={loading}
             onOpen={(ev) => setOpenEvent(ev)}
@@ -270,6 +422,7 @@ export default function App() {
         ) : view ==="ideas" ? (
           <IdeasBoard
             user={user}
+            calendarId={calendar.id}
             onScheduled={(ev) => {
               if (ev) {
                 setEvents((prev) => (prev.some((e) => e.id === ev.id) ? prev : [...prev, ev]));
@@ -399,7 +552,7 @@ export default function App() {
           onCreate={async (payload) => {
             setSaving(true);
             try {
-              const ev = await api.createEvent({ ...payload, userId: user.id });
+              const ev = await api.createEvent({ ...payload, userId: user.id, calendarId: calendar.id });
               setEvents((prev) => [...prev, ev]);
               setShowNew(false);
               setOpenEvent(ev);
@@ -445,7 +598,7 @@ export default function App() {
           onDelete={async (id) => {
             setSaving(true);
             try {
-              await api.deleteEvent(id);
+              await api.deleteEvent(id, user.id);
               setEvents((prev) => prev.filter((e) => e.id !== id));
               setMyEvents((prev) => prev.filter((e) => e.id !== id));
               setOpenEvent(null);
@@ -458,11 +611,20 @@ export default function App() {
           }}
         />
       )}
+
+      {showShare && (
+        <ShareCalendarModal
+          calendar={calendar}
+          user={user}
+          onClose={() => setShowShare(false)}
+          onUpdated={setCalendar}
+        />
+      )}
     </div>
   );
 }
 
-function AuthScreen({ onAuth }) {
+function AuthScreen({ onAuth, joinPreview }) {
   const [mode, setMode] = useState("guest"); // guest | login | register
   const [nameDraft, setNameDraft] = useState(() => loadLastName());
   const [password, setPassword] = useState("");
@@ -522,10 +684,15 @@ function AuthScreen({ onAuth }) {
   return (
     <div style={{ background:"#1B1F2A", minHeight:"100vh" }} className="flex items-center justify-center p-6">
       <div style={{ background:"#F7F3EA", borderRadius: 20 }} className="auth-card anim-pop w-full max-w-sm p-7 shadow-2xl">
-        <div style={{ color:"#8B8FA0" }} className="text-xs uppercase tracking-widest mb-2">Общий календарь встреч</div>
+        <div style={{ color:"#8B8FA0" }} className="text-xs uppercase tracking-widest mb-2">Календари встреч</div>
         <h1 style={{ fontFamily:"Fraunces, serif", color:"#232323" }} className="text-2xl mb-2">
           {titles[mode]}
         </h1>
+        {joinPreview && (
+          <div style={{ background:"#2E8B8B14", border:"1px solid #2E8B8B55", color:"#2E8B8B" }} className="rounded-xl px-3 py-2 text-sm mb-3">
+            Вас пригласили в «{joinPreview.name}». Войдите, чтобы присоединиться.
+          </div>
+        )}
         <p style={{ color:"#5b5f6b" }} className="text-sm mb-5 leading-relaxed">{hints[mode]}</p>
 
         <div style={{ background:"#E8E2D4" }} className="flex rounded-xl p-1 mb-5 gap-0.5">
@@ -713,7 +880,7 @@ function EventsListView({ events, loading, userName, onOpen }) {
   );
 }
 
-function Cabinet({ user, events, loading, onOpen }) {
+function Cabinet({ user, calendar, events, loading, onOpen }) {
   const upcoming = events.filter((e) => e.date >= todayKey());
   const past = events.filter((e) => e.date < todayKey());
 
@@ -731,9 +898,7 @@ function Cabinet({ user, events, loading, onOpen }) {
             )}
           </div>
           <div style={{ color:"#8B8FA0" }} className="text-sm">
-            {user.isGuest
-              ?"Гостевой режим · можно создавать встречи и отмечаться"
-              :"Личный кабинет · мероприятия, куда вы идёте"}
+            {calendar?.name ||"Календарь"} · встречи, куда вы идёте
           </div>
         </div>
       </div>
@@ -742,7 +907,7 @@ function Cabinet({ user, events, loading, onOpen }) {
         <div className="mb-5">
           <div className="flex flex-col sm:flex-row gap-2">
             <button
-              onClick={() => downloadIcsForUser(user.id, `meetings-${user.name}.ics`)}
+              onClick={() => downloadIcsForUser(user.id, `meetings-${user.name}.ics`, calendar?.id)}
               style={{ background:"#232323", color:"#F7F3EA" }}
               className="ui-press flex-1 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
             >
@@ -750,7 +915,7 @@ function Cabinet({ user, events, loading, onOpen }) {
               Apple Calendar (.ics)
             </button>
             <button
-              onClick={() => downloadIcsForUser(user.id, `meetings-${user.name}.ics`)}
+              onClick={() => downloadIcsForUser(user.id, `meetings-${user.name}.ics`, calendar?.id)}
               style={{ background:"#2E8B8B", color:"#F7F3EA" }}
               className="ui-press flex-1 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
             >
@@ -803,7 +968,7 @@ function Cabinet({ user, events, loading, onOpen }) {
   );
 }
 
-function Header({ name, isGuest, saving, view, onToday, onCalendar, onIdeas, onCabinet, onLogout }) {
+function Header({ name, isGuest, saving, view, calendar, onToday, onCalendar, onIdeas, onCabinet, onShare, onSwitch, onLogout }) {
   const nav = [
     { id:"calendar", label:"Календарь", icon: CalendarDays, onClick: onCalendar },
     { id:"ideas", label:"Идеи", icon: Lightbulb, onClick: onIdeas },
@@ -815,8 +980,18 @@ function Header({ name, isGuest, saving, view, onToday, onCalendar, onIdeas, onC
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="min-w-0">
-            <div style={{ color:"#E8A33D" }} className="text-[11px] uppercase tracking-widest">Общий календарь</div>
-            <div style={{ fontFamily:"Fraunces, serif", color:"#F7F3EA" }} className="text-2xl leading-tight truncate">Встречи с друзьями</div>
+            <button
+              type="button"
+              onClick={onSwitch}
+              style={{ color:"#E8A33D" }}
+              className="text-[11px] uppercase tracking-widest hover:underline"
+              title="К списку календарей"
+            >
+              Сменить календарь
+            </button>
+            <div style={{ fontFamily:"Fraunces, serif", color:"#F7F3EA" }} className="text-2xl leading-tight truncate">
+              {calendar?.name ||"Встречи"}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {saving && <span style={{ color:"#8B8FA0" }} className="text-xs hidden sm:inline">сохранение…</span>}
@@ -825,6 +1000,9 @@ function Header({ name, isGuest, saving, view, onToday, onCalendar, onIdeas, onC
                 Гость
               </span>
             )}
+            <button onClick={onShare} title="Поделиться" style={{ color:"#F7F3EA" }} className="ui-press-static ui-hit p-1.5 rounded-lg hover:bg-white/5" aria-label="Поделиться">
+              <Share2 size={16} strokeWidth={1.75} />
+            </button>
             <button onClick={onToday} style={{ color:"#F7F3EA", borderColor:"#8B8FA0" }} className="ui-press text-xs border rounded-full px-3 py-1.5 hidden sm:inline">Сегодня</button>
             <button onClick={onLogout} title="Выйти" style={{ color:"#8B8FA0" }} className="ui-press-static ui-hit p-1.5 rounded-lg hover:bg-white/5" aria-label="Выйти">
               <LogOut size={16} strokeWidth={1.75} />
@@ -904,6 +1082,147 @@ function EventRow({ ev, onOpen, showExport = false, userName }) {
         </a>
       )}
     </div>
+  );
+}
+
+function ShareCalendarModal({ calendar, user, onClose, onUpdated }) {
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(null);
+  const isOwner = calendar.role ==="owner";
+  const inviteUrl = calendar.inviteToken
+    ? `${window.location.origin}/join/${calendar.inviteToken}`
+    : null;
+
+  async function setVisibility(visibility) {
+    if (!isOwner) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.updateCalendar(calendar.slug, { userId: user.id, visibility });
+      onUpdated(updated);
+    } catch (e) {
+      setError(e.message ||"Не удалось сохранить");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rotate() {
+    if (!isOwner) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.rotateInvite(calendar.slug, user.id);
+      onUpdated(updated);
+    } catch (e) {
+      setError(e.message ||"Не удалось обновить ссылку");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("Не удалось скопировать");
+    }
+  }
+
+  return (
+    <ModalShell onClose={onClose}>
+      {(close) => (
+        <>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <div style={{ color:"#8B8FA0" }} className="text-xs uppercase tracking-widest mb-1">Доступ</div>
+              <h2 style={{ fontFamily:"Fraunces, serif", color:"#232323" }} className="text-xl">{calendar.name}</h2>
+            </div>
+            <button type="button" onClick={close} style={{ color:"#8B8FA0" }} className="ui-press-static ui-hit p-1.5 rounded-lg" aria-label="Закрыть">
+              <X size={18} />
+            </button>
+          </div>
+
+          <p style={{ color:"#5b5f6b" }} className="text-sm mb-4">
+            {calendar.visibility ==="link"
+              ?"Гости могут войти по ссылке-приглашению."
+              :"Приватный календарь — только текущие участники, ссылка не работает."}
+          </p>
+
+          {isOwner ? (
+            <div style={{ background:"#E8E2D4" }} className="flex rounded-xl p-1 gap-0.5 mb-4">
+              {[
+                ["link","По ссылке", Link2],
+                ["private","Приватный", Lock],
+              ].map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setVisibility(id)}
+                  style={{
+                    background: calendar.visibility === id ?"#F7F3EA" :"transparent",
+                    color:"#232323",
+                  }}
+                  className={`ui-press-static flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1 ${
+                    calendar.visibility === id ?"shadow-sm" :""
+                  }`}
+                >
+                  <Icon size={13} /> {label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color:"#8B8FA0" }} className="text-sm mb-4 flex items-center gap-2">
+              {calendar.visibility ==="private" ? <Lock size={14} /> : <Link2 size={14} />}
+              {calendar.visibility ==="private" ?"Приватный" :"По ссылке"} · участников: {calendar.memberCount ??"—"}
+            </div>
+          )}
+
+          {calendar.visibility ==="link" && inviteUrl && (
+            <div style={{ background:"#FFFDF8", border:"1.5px solid #DCD4C0" }} className="rounded-2xl p-3 mb-3">
+              <div style={{ color:"#8B8FA0" }} className="text-xs mb-2">Ссылка-приглашение</div>
+              <div style={{ color:"#232323", wordBreak:"break-all" }} className="text-sm mb-3 font-medium">
+                {inviteUrl}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={copy}
+                  style={{ background:"#E8A33D", color:"#1B1F2A" }}
+                  className="ui-press-static flex-1 rounded-xl py-2.5 text-sm font-semibold"
+                >
+                  {copied ?"Скопировано" :"Копировать"}
+                </button>
+                {isOwner && (
+                  <button
+                    type="button"
+                    onClick={rotate}
+                    disabled={busy}
+                    style={{ color:"#8B8FA0", borderColor:"#DCD4C0" }}
+                    className="ui-press-static rounded-xl px-3 text-sm border"
+                  >
+                    Новая
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {calendar.visibility ==="link" && !inviteUrl && (
+            <p style={{ color:"#8B8FA0" }} className="text-sm mb-3">
+              Ссылку видит только владелец. Попросите его поделиться приглашением.
+            </p>
+          )}
+
+          {error && <div style={{ color:"#D8635B" }} className="text-sm">{error}</div>}
+        </>
+      )}
+    </ModalShell>
   );
 }
 

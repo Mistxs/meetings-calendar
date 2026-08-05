@@ -44,9 +44,10 @@ export function googleCalendarUrl(ev) {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
-export function downloadIcsForUser(userId, filename = "meetings.ics") {
+export function downloadIcsForUser(userId, filename = "meetings.ics", calendarId) {
+  const q = calendarId ? `?calendarId=${encodeURIComponent(calendarId)}` : "";
   const a = document.createElement("a");
-  a.href = `/api/users/${userId}/events.ics`;
+  a.href = `/api/users/${userId}/events.ics${q}`;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
